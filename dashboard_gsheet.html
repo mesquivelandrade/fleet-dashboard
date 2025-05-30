@@ -1,0 +1,205 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Fleet Status Dashboard (Google Sheets Sync)</title>
+  <style>
+    body {
+      font-family: 'Segoe UI', sans-serif;
+      background: #2f333a;
+      margin: 0;
+      padding: 10px;
+    }
+    .dashboard {
+      max-width: 800px;
+      margin: 0 auto;
+      background: white;
+      border-radius: 12px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+      overflow: hidden;
+    }
+    table {
+      border-collapse: collapse;
+      width: 100%;
+    }
+    th {
+      background-color: #fafafa;
+      color: #333;
+      text-transform: uppercase;
+      font-size: 14px;
+      padding: 12px;
+      border-bottom: 2px solid #ddd;
+      text-align: center;
+    }
+    td {
+      padding: 0;
+      text-align: center;
+      height: 60px;
+      border-bottom: 1px solid #eee;
+    }
+    td.unit-cell {
+      background-color: #000;
+      color: #fff;
+      font-weight: bold;
+      font-size: 24px;
+      width: 80px;
+    }
+    .status-wrapper {
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100%;
+    }
+    select {
+      width: 100%;
+      height: 100%;
+      padding: 0;
+      margin: 0;
+      border: none;
+      font-weight: 600;
+      font-size: 16px;
+      text-align: center;
+      text-align-last: center;
+      box-sizing: border-box;
+      border-radius: 0;
+      outline: none;
+      cursor: pointer;
+    }
+    .timestamp {
+      font-size: 11px;
+      font-style: italic;
+      color: #000;
+      width: 100%;
+      padding: 2px 0 1px;
+      margin-top: 0;
+      font-weight: 400;
+      line-height: 1.1;
+      border-top: 1px solid transparent;
+    }
+    .in-service { background-color: #ffffff; color: #000000; }
+    .in-service.timestamp { border-top: 1px solid #ffffff; }
+    .out-of-service { background-color: #d32f2f; color: #ffffff; }
+    .out-of-service.timestamp { border-top: 1px solid #d32f2f; }
+    .needs-attention { background-color: #ffe082; color: #000000; }
+    .needs-attention.timestamp { border-top: 1px solid #ffe082; }
+    .in-repair { background-color: #90caf9; color: #0d47a1; }
+    .in-repair.timestamp { border-top: 1px solid #90caf9; }
+  </style>
+</head>
+<body>
+  <div class="dashboard">
+    <table>
+      <thead>
+        <tr>
+          <th>Unit</th>
+          <th>Status</th>
+        </tr>
+      </thead>
+      <tbody id="unitTableBody"></tbody>
+    </table>
+  </div>
+
+  <script>
+    const WEBAPP_URL = 'https://script.google.com/macros/s/AKfycbxxCnu2Skx0W1eEMNTeo-vFzJ1GkeYTTODGNrc0upSQ0n9F-psnD52ejDHddDb_alKNHg/exec';
+
+    const defaultUnits = [
+      "001", "005", "009", "010", "011", "012", "014",
+      "015", "016", "017", "018", "019", "020", "022",
+      "023", "024", "025", "026", "027"
+    ];
+
+    const statusOptions = [
+      { text: "Needs Attention", class: "needs-attention" },
+      { text: "In Service", class: "in-service" },
+      { text: "Out of Service", class: "out-of-service" },
+      { text: "In Repair", class: "in-repair" }
+    ];
+
+    function getStatusClass(statusText) {
+      const match = statusOptions.find(opt => opt.text === statusText);
+      return match ? match.class : "in-service";
+    }
+
+    async function fetchSheetData() {
+      const res = await fetch(WEBAPP_URL);
+      return await res.json();
+    }
+
+    async function updateStatus(unit, status) {
+      const timestamp = new Date().toLocaleString();
+      await fetch(WEBAPP_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ unit, status, timestamp })
+      });
+
+      const ts = document.getElementById(`timestamp-${unit}`);
+      ts.textContent = "Last updated: " + timestamp;
+      ts.className = "timestamp " + getStatusClass(status);
+
+      const select = document.getElementById(`select-${unit}`);
+      select.className = getStatusClass(status);
+    }
+
+    function handleChange(event, unit) {
+      const status = event.target.value;
+      updateStatus(unit, status);
+
+      const select = document.getElementById(`select-${unit}`);
+      select.className = getStatusClass(status);
+
+      const ts = document.getElementById(`timestamp-${unit}`);
+      ts.className = "timestamp " + getStatusClass(status);
+    }
+
+    function createRow(unit, status, timestamp) {
+      const statusClass = getStatusClass(status);
+      return `
+        <tr>
+          <td class="unit-cell">${unit}</td>
+          <td>
+            <div class="status-wrapper">
+              <select id="select-${unit}" onchange="handleChange(event, '${unit}')">
+                ${statusOptions.map(opt => `
+                  <option class="${opt.class}" ${opt.text === status ? 'selected' : ''}>${opt.text}</option>
+                `).join('')}
+              </select>
+              <div id="timestamp-${unit}" class="timestamp ${statusClass}">
+                Last updated: ${timestamp || "--"}
+              </div>
+            </div>
+          </td>
+        </tr>
+      `;
+    }
+
+    async function initDashboard() {
+      const sheetData = await fetchSheetData();
+      const dataMap = Object.fromEntries(sheetData.map(row => [row.Unit, row]));
+
+      const table = document.getElementById("unitTableBody");
+      table.innerHTML = "";
+
+      defaultUnits.forEach(unit => {
+        const entry = dataMap[unit] || {};
+        const status = entry.Status || "In Service";
+        const timestamp = entry.LastUpdated || "--";
+        table.innerHTML += createRow(unit, status, timestamp);
+      });
+
+      defaultUnits.forEach(unit => {
+        const select = document.getElementById(`select-${unit}`);
+        const ts = document.getElementById(`timestamp-${unit}`);
+        const status = select.value;
+        const className = getStatusClass(status);
+        select.className = className;
+        ts.className = "timestamp " + className;
+      });
+    }
+
+    document.addEventListener("DOMContentLoaded", initDashboard);
+  </script>
+</body>
+</html>
